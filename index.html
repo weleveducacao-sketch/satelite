@@ -30,6 +30,7 @@ button:disabled{opacity:.5;cursor:default}
 <div id="map"></div>
 <footer>
   <div id="read">Arraste, aproxime e clique sobre o imóvel.</div>
+  <span style="font-size:12px;color:var(--muted);flex:1 1 220px">A imagem do laudo sai centrada no ponto, com a aproximação atual (afaste o mapa para mostrar mais da região).</span>
   <button class="pri" id="send" type="button" disabled>Usar este ponto na ficha</button>
   <span id="msg"></span>
 </footer>
@@ -101,6 +102,30 @@ function SatMap(box,o){
     setView:function(lat,lon,zz){var p=ll2w(lat,lon,zz);z=zz;cx=p.x;cy=p.y;render()},
     zoomBy:function(dz){zoomAt(W/2,H/2,z+dz)},
     setMarker:function(lat,lon){mk={lat:lat,lon:lon};place()},
+    getZoom:function(){return z},
+    /* imagem da região centrada no ponto, com o marcador do imóvel, para o laudo */
+    capture:function(lat,lon,zz,W2,H2){
+      var p=ll2w(lat,lon,zz),n=Math.pow(2,zz),tlx=p.x-W2/2,tly=p.y-H2/2,c=document.createElement("canvas");c.width=W2;c.height=H2;
+      var g=c.getContext("2d"),jobs=[],ref=["https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}","https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"];
+      var lays=[LAYERS[0]].concat(ref);
+      var x0=Math.floor(tlx/TILE),x1=Math.floor((tlx+W2)/TILE),y0=Math.max(0,Math.floor(tly/TILE)),y1=Math.min(n-1,Math.floor((tly+H2)/TILE));
+      lays.forEach(function(url,L){var lj=[];for(var ty=y0;ty<=y1;ty++)for(var tx=x0;tx<=x1;tx++)(function(tx,ty){lj.push(new Promise(function(res){
+        var im=new Image();im.crossOrigin="anonymous";im.onload=function(){res({im:im,x:Math.round(tx*TILE-tlx),y:Math.round(ty*TILE-tly)})};im.onerror=function(){res(null)};
+        im.src=url.replace("{z}",zz).replace("{y}",ty).replace("{x}",((tx%n)+n)%n)}))})(tx,ty);jobs.push(Promise.all(lj))});
+      return Promise.all(jobs).then(function(camadas){
+        if(!camadas[0].some(Boolean))throw new Error("imagens não carregaram");
+        camadas.forEach(function(cs){cs.forEach(function(t){if(t)g.drawImage(t.im,t.x,t.y)})});
+        /* marcador: alfinete vermelho com borda branca, ponta no imóvel */
+        var cx=W2/2,cy=H2/2,R=Math.round(W2/50);
+        g.save();g.shadowColor="rgba(0,0,0,.55)";g.shadowBlur=R*0.6;g.shadowOffsetY=R*0.15;
+        g.beginPath();g.moveTo(cx,cy);g.bezierCurveTo(cx-R*0.35,cy-R*1.1,cx-R*1.05,cy-R*1.55,cx-R*1.05,cy-R*2.3);g.arc(cx,cy-R*2.3,R*1.05,Math.PI,0);g.bezierCurveTo(cx+R*1.05,cy-R*1.55,cx+R*0.35,cy-R*1.1,cx,cy);g.closePath();
+        g.fillStyle="#e53935";g.fill();g.restore();g.lineWidth=Math.max(2,R*0.18);g.strokeStyle="#fff";g.stroke();
+        g.beginPath();g.arc(cx,cy-R*2.3,R*0.42,0,7);g.fillStyle="#fff";g.fill();
+        var fs=Math.round(W2/80);g.font=fs+"px sans-serif";g.textAlign="right";g.textBaseline="bottom";g.lineWidth=3;g.strokeStyle="rgba(0,0,0,.6)";
+        var at="Imagens: Esri, Maxar, Earthstar Geographics";g.strokeText(at,W2-8,H2-6);g.fillStyle="#fff";g.fillText(at,W2-8,H2-6);
+        return new Promise(function(res,rej){c.toBlob(function(b){b?res(b):rej(new Error("falha ao gerar a imagem"))},"image/jpeg",.88)});
+      });
+    },
     destroy:function(){clearTimeout(t)}
   };
 }
@@ -119,7 +144,13 @@ $("#send").addEventListener("click",function(){
   if(!pick)return;
   var txt=pick.lat.toFixed(5)+", "+pick.lon.toFixed(5);
   if(window.opener){
-    try{window.opener.postMessage({type:"ficha-coord",lat:pick.lat,lon:pick.lon},"*");say("Enviado para a ficha.");setTimeout(function(){window.close()},600);return}catch(e){}
+    var zc=Math.max(16,Math.min(18,map.getZoom())),p=pick;
+    $("#send").disabled=true;say("Preparando a imagem da região para o laudo...");
+    map.capture(p.lat,p.lon,zc,1400,860).catch(function(){return null}).then(function(img){
+      try{window.opener.postMessage({type:"ficha-coord",lat:p.lat,lon:p.lon,img:img||null},"*");say(img?"Enviado para a ficha, com a imagem da região.":"Coordenada enviada. A imagem da região não carregou.");setTimeout(function(){window.close()},img?700:2500)}
+      catch(e){$("#send").disabled=false;say("Não consegui enviar para a ficha. Tente de novo.",true)}
+    });
+    return;
   }
   function manual(){say("Copie "+txt+" e cole na ficha com Ctrl+V.",true)}
   if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).then(function(){say("Copiado. Volte para a ficha e aperte Ctrl+V.")},manual);else manual();
