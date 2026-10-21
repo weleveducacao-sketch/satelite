@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FipeZAP para a Ficha</title>
+<style>
+:root{--bg:#f6f4ef;--ink:#1c2733;--muted:#5d6b78;--ok:#2c7a3f;--bad:#a32e2e}
+@media (prefers-color-scheme:dark){:root{--bg:#12181e;--ink:#e8e4da;--muted:#9aa7b3;--ok:#6cc27e;--bad:#e58080;color-scheme:dark}}
+body{margin:0;padding:16px;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,"Segoe UI",sans-serif}
+#msg{font-weight:600}
+img{max-width:100%;margin-top:12px;border:1px solid #ccc}
+</style>
+</head>
+<body>
+<div id="msg">Buscando o Raio-X FipeZAP mais recente...</div>
+<div id="info" style="color:var(--muted);font-size:13px"></div>
+<img id="img" alt="Percentual médio de desconto em transações" hidden>
+<script>
+(function(){
+var msg=document.getElementById("msg"),info=document.getElementById("info"),im=document.getElementById("img");
+function say(t,bad){msg.textContent=t;msg.style.color=bad?"var(--bad)":"var(--ok)"}
+var q="?t="+Date.now();
+Promise.all([fetch("dados.json"+q).then(function(r){if(!r.ok)throw new Error("dados");return r.json()}),fetch("desconto.png"+q).then(function(r){if(!r.ok)throw new Error("imagem");return r.blob()})])
+.then(function(x){
+  var d=x[0],img=x[1];
+  info.textContent="Raio-X FipeZAP do "+d.trimestre+" · acumulado em 12 meses até "+d.periodo+" · todas as transações: "+String(d.pct).replace(".",",")+"%";
+  im.src=URL.createObjectURL(img);im.hidden=false;
+  if(window.opener){
+    window.opener.postMessage({type:"ficha-fipezap",ref:d.ref,trimestre:d.trimestre,periodo:d.periodo,pct:d.pct,pagina:d.pagina,url:d.url,verificado:d.verificado,img:img},"*");
+    say("Enviado para a ficha.");setTimeout(function(){window.close()},900);
+  }else say("Desconto médio: "+String(d.pct).replace(".",",")+"%");
+}).catch(function(){say("Não consegui ler os dados do FipeZAP. Tente de novo mais tarde.",true)});
+})();
+</script>
+</body>
+</html>
